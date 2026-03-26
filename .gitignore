@@ -1,0 +1,25 @@
+# --- Artefactos de empaquetado local (quita estas líneas si versionas snapshots) ---
+/starter-v1/
+/starter-v1.zip
+
+# --- Entorno en la raíz (si existiera); cada paquete ignora su propio .env ---
+.env
+.env.local
+
+# --- SO ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+
+# --- IDE / editor ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.cursor/
+
+# --- Caches y temporales ---
+*.tmp
+*.temp
+*.swp
+*~

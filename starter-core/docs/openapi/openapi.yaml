@@ -1,0 +1,1228 @@
+openapi: 3.0.3
+info:
+  title: Starter Core API
+  version: "1.0"
+  description: |
+    API REST del starter empresarial (v1). Todas las respuestas JSON siguen el envelope **`code`**, **`message`**, **`data`**.
+
+    **Excepción:** `GET /api/v1/health` y `GET /api/v1/ready` responden sin envelope (uso operativo / probes).
+
+    ### Multi-tenant
+    El tenant activo se fija en la **sesión** tras el login. El login **recomendado** es global (`usuario` + `password` sin `tenant_codigo`): si el usuario tiene una sola empresa se emiten tokens; si varias, respuesta `TENANT_SELECTION_REQUIRED` y luego `POST .../login/select-tenant`. Enviar `tenant_codigo` en el login sigue soportado (compatibilidad).
+
+    ### Autorización
+    Tras autenticación, el acceso a usuarios y asignación de roles exige capacidad **`manage-users`** (Gates + roles dinámicos, p. ej. `admin` / `super_admin` según configuración). La gestión de roles exige **`manage-roles`**. El modelo evolucionará a permisos finos; ver `docs/AUTHORIZATION.md`.
+
+    ### Autenticación
+    Salvo login y refresh, las rutas protegidas esperan cabecera `Authorization: Bearer <access_token>` (token personal Sanctum emitido en login/refresh).
+
+servers:
+  - url: /
+    description: Raíz de la app (ajustar host/puerto en el cliente, p. ej. http://localhost:8000)
+
+tags:
+  - name: System
+    description: Comprobaciones operativas (sin envelope estándar)
+  - name: Auth
+    description: Sesión, tokens y perfil
+  - name: Users
+    description: Usuarios del tenant (requiere rol administrativo)
+  - name: Roles
+    description: Roles del tenant (requiere rol administrativo)
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [System]
+      summary: Comprobación de disponibilidad (v1)
+      description: |
+        No usa el envelope `code` / `message` / `data`. Respuesta mínima para balanceadores y monitores.
+      operationId: healthV1
+      responses:
+        "200":
+          description: API v1 responde
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/v1/ready:
+    get:
+      tags: [System]
+      summary: Comprobación de readiness (dependencias)
+      description: |
+        Verifica disponibilidad mínima de dependencias operativas (DB, cache, queue).
+        Puede devolver 503 si una dependencia crítica falla.
+      operationId: readinessV1
+      responses:
+        "200":
+          description: Servicio listo para recibir tráfico
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks, timestamp]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                    example: ok
+                  checks:
+                    type: object
+                    required: [database, cache, queue]
+                    properties:
+                      database:
+                        type: object
+                        required: [ok, driver]
+                        properties:
+                          ok: { type: boolean }
+                          driver: { type: string }
+                          error: { type: string, nullable: true }
+                      cache:
+                        type: object
+                        required: [ok, store]
+                        properties:
+                          ok: { type: boolean }
+                          store: { type: string }
+                          error: { type: string, nullable: true }
+                      queue:
+                        type: object
+                        required: [ok, connection]
+                        properties:
+                          ok: { type: boolean }
+                          connection: { type: string }
+                          error: { type: string, nullable: true }
+                  timestamp:
+                    type: string
+                    format: date-time
+        "503":
+          description: Dependencia crítica no disponible (degraded)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks, timestamp]
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      description: |
+        Público. **Camino principal (Fase 2):** cuerpo con `usuario` y `password` solamente → si hay una empresa accesible, respuesta `code: OK` con tokens; si hay varias, `code: TENANT_SELECTION_REQUIRED` con `selection_token` y lista `tenants` (sin tokens hasta completar selección).
+
+        **Compatibilidad:** si se envía `tenant_codigo`, el comportamiento equivale al login clásico por empresa explícita (misma respuesta `OK` que antes).
+
+        Rate limit: `auth-login`.
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Sesión creada o pendiente de elegir empresa
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ApiEnvelopeTokenSuccess"
+                  - $ref: "#/components/schemas/ApiEnvelopeTenantSelectionRequired"
+              examples:
+                tokens:
+                  value:
+                    code: OK
+                    message: Inicio de sesión correcto.
+                    data:
+                      access_token: "…"
+                      refresh_token: "…"
+                      token_type: Bearer
+                      expires_in: 3600
+                      session_uuid: "…"
+                selectTenant:
+                  value:
+                    code: TENANT_SELECTION_REQUIRED
+                    message: Seleccione empresa para continuar.
+                    data:
+                      selection_token: "…"
+                      expires_in: 600
+                      tenants:
+                        - id: 1
+                          codigo: DEFAULT
+                          nombre: Empresa principal
+                          slug: principal
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          description: Cuenta desactivada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              examples:
+                inactive:
+                  value:
+                    code: ACCOUNT_INACTIVE
+                    message: La cuenta está desactivada.
+                    data: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /api/v1/auth/login/select-tenant:
+    post:
+      tags: [Auth]
+      summary: Completar login tras elegir empresa
+      description: |
+        Público. Intercambia `selection_token` (devuelto por login global cuando hay varias empresas) y `tenant_codigo` por el mismo payload de tokens que el login completo.
+        El token de selección es de un solo uso y caduca (ver `expires_in` del paso anterior). Rate limit `auth-login-select`.
+      operationId: authLoginSelectTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginSelectTenantRequest"
+      responses:
+        "200":
+          description: Tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeTokenSuccess"
+        "401":
+          description: Token de selección inválido o empresa no accesible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              examples:
+                badSelection:
+                  value:
+                    code: SELECTION_TOKEN_INVALID
+                    message: Token de selección inválido o expirado. Inicie sesión de nuevo.
+                    data: null
+                badTenant:
+                  value:
+                    code: INVALID_CREDENTIALS
+                    message: Empresa no válida o sin acceso.
+                    data: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renovar tokens
+      description: |
+        Público. Intercambia `refresh_token` por un nuevo par de tokens.
+        Rate limit dedicado (`auth-refresh`).
+      operationId: authRefresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Renovación correcta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeTokenSuccess"
+        "401":
+          description: Token de refresh inválido, expirado o sesión asociada no válida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              examples:
+                invalid:
+                  value:
+                    code: REFRESH_INVALID
+                    message: Token de renovación inválido o revocado.
+                    data: null
+                expired:
+                  value:
+                    code: REFRESH_EXPIRED
+                    message: El token de renovación ha expirado.
+                    data: null
+                sessionInactive:
+                  value:
+                    code: SESSION_INVALID
+                    message: La sesión ya no es válida. Vuelva a iniciar sesión.
+                    data: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cerrar sesión
+      description: |
+        Requiere **Bearer** + middleware `tenant.context` (sin `active.api.session`).
+        Revoca el access token actual y la sesión asociada.
+      operationId: authLogout
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Sesión cerrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeOkEmpty"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Perfil del usuario autenticado
+      description: |
+        Requiere **Bearer** + `tenant.context` + **`active.api.session`** (sesión válida en base de datos).
+      operationId: authMe
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Perfil y tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeMe"
+        "401":
+          description: No autenticado, token inválido o sesión no válida / expirada / reemplazada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              examples:
+                unauthenticated:
+                  value:
+                    code: UNAUTHENTICATED
+                    message: No autenticado.
+                    data: null
+                tokenBad:
+                  value:
+                    code: TOKEN_INVALID_OR_REVOKED
+                    message: Token inválido o revocado.
+                    data: null
+                sessionInvalid:
+                  value:
+                    code: SESSION_INVALID
+                    message: Sesión no válida.
+                    data: null
+                sessionExpired:
+                  value:
+                    code: SESSION_EXPIRED
+                    message: La sesión ha expirado.
+                    data: null
+                sessionSuperseded:
+                  value:
+                    code: SESSION_SUPERSEDED
+                    message: La sesión fue reemplazada por un nuevo inicio de sesión.
+                    data: null
+
+  /api/v1/auth/switch-tenant:
+    post:
+      tags: [Auth]
+      summary: Cambiar empresa activa (sesión abierta)
+      description: |
+        Con **Bearer** y sesión activa, actualiza `user_sessions.tenant_id` sin nuevo login.
+        El usuario debe pertenecer al tenant destino (`user_tenants` o `users.tenant_id`).
+        El mismo access token sigue válido; el contexto de tenant cambia para peticiones posteriores.
+      operationId: authSwitchTenant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_codigo]
+              properties:
+                tenant_codigo:
+                  type: string
+                  description: Código de empresa (`tenants.codigo`)
+      responses:
+        "200":
+          description: Tenant activo actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeSwitchTenantOk"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: Sin membresía en el tenant destino
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              example:
+                code: FORBIDDEN
+                message: No tienes acceso a esa empresa.
+                data: null
+        "404":
+          description: Empresa inexistente o inactiva
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              example:
+                code: TENANT_NOT_FOUND
+                message: Empresa no encontrada o inactiva.
+                data: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: Listar usuarios
+      description: Requiere Bearer + tenant + sesión activa + capacidad **manage-users**.
+      operationId: usersIndex
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: Tamaño de página (por defecto 15)
+      responses:
+        "200":
+          description: Listado paginado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUserList"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      tags: [Users]
+      summary: Crear usuario
+      operationId: usersStore
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreUserRequest"
+      responses:
+        "201":
+          description: Usuario creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: Obtener usuario
+      operationId: usersShow
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Usuario encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Users]
+      summary: Actualizar usuario
+      operationId: usersUpdate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/users/{id}/deactivate:
+    patch:
+      tags: [Users]
+      summary: Desactivar usuario
+      description: "Marca el usuario como inactivo (activo=false) y revoca sus accesos."
+      operationId: usersDeactivate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Usuario inactivado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/users/{id}/roles:
+    post:
+      tags: [Users]
+      summary: Añadir roles al usuario
+      operationId: usersRolesAttach
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachRolesRequest"
+      responses:
+        "200":
+          description: Roles añadidos; `data` es el usuario con roles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    put:
+      tags: [Users]
+      summary: Sincronizar roles del usuario
+      description: Sustituye el conjunto de roles por `role_ids` (puede ser lista vacía).
+      operationId: usersRolesSync
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncRolesRequest"
+      responses:
+        "200":
+          description: Roles sincronizados
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeUser"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/roles:
+    get:
+      tags: [Roles]
+      summary: Listar roles
+      description: Requiere capacidad **manage-roles**.
+      operationId: rolesIndex
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: Tamaño de página (por defecto 50)
+      responses:
+        "200":
+          description: Listado paginado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeRoleList"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      tags: [Roles]
+      summary: Crear rol
+      operationId: rolesStore
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoreRoleRequest"
+      responses:
+        "201":
+          description: Rol creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeRole"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/roles/{id}:
+    get:
+      tags: [Roles]
+      summary: Obtener rol
+      operationId: rolesShow
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoleId"
+      responses:
+        "200":
+          description: Rol encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeRole"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Roles]
+      summary: Actualizar rol
+      operationId: rolesUpdate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RoleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleRequest"
+      responses:
+        "200":
+          description: Rol actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeRole"
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum Personal Access Token
+      description: |
+        Valor del `access_token` devuelto por login o refresh.
+        Cabecera: `Authorization: Bearer <token>`.
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: ID del usuario (solo del tenant actual)
+    RoleId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: ID del rol (solo del tenant actual)
+
+  responses:
+    Unauthenticated:
+      description: Sin autenticación válida
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+          example:
+            code: UNAUTHENTICATED
+            message: No autenticado.
+            data: null
+    InvalidCredentials:
+      description: Usuario/clave incorrectos para el tenant indicado
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+          example:
+            code: INVALID_CREDENTIALS
+            message: Credenciales incorrectas.
+            data: null
+    Forbidden:
+      description: Autenticado pero sin permiso (Gates / rol) o contexto de tenant no disponible
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+          example:
+            code: FORBIDDEN
+            message: Acceso denegado.
+            data: null
+    NotFound:
+      description: Recurso inexistente o fuera del tenant
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+          example:
+            code: NOT_FOUND
+            message: Recurso no encontrado.
+            data: null
+    ValidationError:
+      description: Error de validación
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeValidation"
+          example:
+            code: VALIDATION_ERROR
+            message: Los datos enviados no son válidos.
+            data:
+              errors:
+                campo:
+                  - Mensaje de validación.
+    TooManyAttempts:
+      description: Rate limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+          example:
+            code: TOO_MANY_ATTEMPTS
+            message: Demasiados intentos. Intente más tarde.
+            data: null
+    SessionOrAuth401:
+      description: |
+        Cualquier 401 devuelto por `auth:sanctum`, `EnsureActiveApiSession` u otras rutas protegidas.
+        Códigos posibles incluyen `UNAUTHENTICATED`, `TOKEN_INVALID_OR_REVOKED`, `SESSION_INVALID`, `SESSION_EXPIRED`, `SESSION_SUPERSEDED`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiEnvelopeError"
+
+  schemas:
+    ApiEnvelopeError:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          description: Código estable (p. ej. AuthErrorCode, ApiErrorCode)
+        message:
+          type: string
+        data:
+          nullable: true
+
+    ApiEnvelopeValidation:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelopeError"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [errors]
+              properties:
+                errors:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+
+    LoginRequest:
+      type: object
+      required: [usuario, password]
+      properties:
+        tenant_codigo:
+          type: string
+          maxLength: 64
+          description: Opcional. Si se omite o va vacío, login global (Fase 2).
+        usuario:
+          type: string
+          maxLength: 255
+        password:
+          type: string
+          maxLength: 255
+
+    LoginSelectTenantRequest:
+      type: object
+      required: [selection_token, tenant_codigo]
+      properties:
+        selection_token:
+          type: string
+          minLength: 64
+          maxLength: 64
+          description: Token opaco devuelto en TENANT_SELECTION_REQUIRED
+        tenant_codigo:
+          type: string
+          maxLength: 64
+
+    TenantOptionForLogin:
+      type: object
+      required: [id, codigo, nombre, slug]
+      properties:
+        id:
+          type: integer
+        codigo:
+          type: string
+        nombre:
+          type: string
+        slug:
+          type: string
+
+    TenantSelectionPayload:
+      type: object
+      required: [selection_token, expires_in, tenants]
+      properties:
+        selection_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Segundos hasta expiración del selection_token
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantOptionForLogin"
+
+    ApiEnvelopeTenantSelectionRequired:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: TENANT_SELECTION_REQUIRED
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/TenantSelectionPayload"
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 32
+          maxLength: 512
+
+    TokenPayload:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - expires_in
+        - session_uuid
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Segundos de vida restantes del access token
+        session_uuid:
+          type: string
+          description: Identificador de sesión (coincide con el nombre del token Sanctum)
+
+    ApiEnvelopeTokenSuccess:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/TokenPayload"
+
+    ApiEnvelopeOkEmpty:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          nullable: true
+
+    TenantSnippet:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: integer
+        codigo:
+          type: string
+        nombre:
+          type: string
+        slug:
+          type: string
+
+    UserSnippet:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenant_id:
+          type: integer
+        usuario:
+          type: string
+        activo:
+          type: boolean
+        fecha_alta:
+          type: string
+          format: date
+          nullable: true
+
+    ApiEnvelopeMe:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          type: object
+          required: [user, tenant, accessible_tenants]
+          properties:
+            user:
+              $ref: "#/components/schemas/UserWithRoles"
+            tenant:
+              $ref: "#/components/schemas/TenantSnippet"
+            accessible_tenants:
+              type: array
+              description: Empresas a las que el usuario puede cambiar de contexto (Fase 3)
+              items:
+                $ref: "#/components/schemas/TenantSnippet"
+
+    ApiEnvelopeSwitchTenantOk:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          type: object
+          required: [tenant]
+          properties:
+            tenant:
+              $ref: "#/components/schemas/TenantSnippet"
+
+    RoleRef:
+      type: object
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        slug:
+          type: string
+
+    UserWithRoles:
+      allOf:
+        - $ref: "#/components/schemas/UserSnippet"
+        - type: object
+          properties:
+            codigo_cliente:
+              type: string
+              nullable: true
+            roles:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoleRef"
+
+    PaginationMeta:
+      type: object
+      required: [current_page, last_page, per_page, total]
+      properties:
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+
+    ApiEnvelopeUser:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/UserWithRoles"
+
+    ApiEnvelopeUserList:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          type: object
+          required: [items, meta]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/UserWithRoles"
+            meta:
+              $ref: "#/components/schemas/PaginationMeta"
+
+    RoleResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        tenant_id:
+          type: integer
+        nombre:
+          type: string
+        slug:
+          type: string
+        descripcion:
+          type: string
+          nullable: true
+
+    ApiEnvelopeRole:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/RoleResource"
+
+    ApiEnvelopeRoleList:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          example: OK
+        message:
+          type: string
+        data:
+          type: object
+          required: [items, meta]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoleResource"
+            meta:
+              $ref: "#/components/schemas/PaginationMeta"
+
+    StoreUserRequest:
+      type: object
+      required: [usuario, password, password_confirmation]
+      properties:
+        usuario:
+          type: string
+          maxLength: 255
+        password:
+          type: string
+          minLength: 8
+        password_confirmation:
+          type: string
+        codigo_cliente:
+          type: string
+          maxLength: 255
+          nullable: true
+        fecha_alta:
+          type: string
+          format: date
+          nullable: true
+        activo:
+          type: boolean
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        usuario:
+          type: string
+          maxLength: 255
+        password:
+          type: string
+          minLength: 8
+          nullable: true
+        password_confirmation:
+          type: string
+        codigo_cliente:
+          type: string
+          maxLength: 255
+          nullable: true
+        fecha_alta:
+          type: string
+          format: date
+          nullable: true
+        activo:
+          type: boolean
+
+    AttachRolesRequest:
+      type: object
+      required: [role_ids]
+      properties:
+        role_ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+
+    SyncRolesRequest:
+      type: object
+      required: [role_ids]
+      properties:
+        role_ids:
+          type: array
+          items:
+            type: integer
+          description: Lista completa de IDs de rol del tenant (puede ser vacía)
+
+    StoreRoleRequest:
+      type: object
+      required: [nombre, slug]
+      properties:
+        nombre:
+          type: string
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          pattern: "^[a-z0-9_]+$"
+        descripcion:
+          type: string
+          maxLength: 1000
+          nullable: true
+
+    UpdateRoleRequest:
+      type: object
+      required: [nombre, slug]
+      properties:
+        nombre:
+          type: string
+          maxLength: 255
+        slug:
+          type: string
+          maxLength: 255
+          pattern: "^[a-z0-9_]+$"
+        descripcion:
+          type: string
+          maxLength: 1000
+          nullable: true

@@ -1,0 +1,462 @@
+openapi: 3.0.3
+
+info:
+  title: User Management API
+  description: |
+    REST API for managing users with authentication and pagination.
+    All endpoints except the health check require a valid JWT Bearer token.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development (Laravel / php artisan serve)
+
+tags:
+  - name: Health
+    description: Public API availability and status
+  - name: Users
+    description: User CRUD operations (JWT required)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Returns the API status and uptime. This endpoint is public and does not require authentication.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ok:
+                  summary: Typical response
+                  value:
+                    status: ok
+                    uptime: 3600.42
+
+  /users:
+    get:
+      tags:
+        - Users
+      summary: List users
+      description: |
+        Returns a paginated list of users. Supports optional case-insensitive search
+        by name or email via the `search` query parameter.
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUsersResponse'
+              examples:
+                page1:
+                  summary: First page
+                  value:
+                    data:
+                      - id: 1
+                        name: Ana López
+                        email: ana@example.com
+                        age: 30
+                        createdAt: '2025-01-15T10:00:00.000Z'
+                      - id: 2
+                        name: Luis Pérez
+                        email: luis@example.com
+                        age: 42
+                        createdAt: '2025-02-01T14:30:00.000Z'
+                    page: 1
+                    limit: 10
+                    total: 42
+                    totalPages: 5
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - Users
+      summary: Create user
+      description: Creates a new user with the provided data. Returns the created user including server-generated fields.
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            examples:
+              minimal:
+                summary: With age
+                value:
+                  name: María García
+                  email: maria@example.com
+                  age: 28
+              noAge:
+                summary: Without optional age
+                value:
+                  name: Carlos Ruiz
+                  email: carlos@example.com
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                created:
+                  value:
+                    id: 10
+                    name: María García
+                    email: maria@example.com
+                    age: 28
+                    createdAt: '2025-03-22T09:15:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user by ID
+      description: Returns a single user identified by its numeric ID.
+      operationId: getUserById
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                one:
+                  value:
+                    id: 1
+                    name: Ana López
+                    email: ana@example.com
+                    age: 30
+                    createdAt: '2025-01-15T10:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - Users
+      summary: Update user
+      description: Replaces the user fields with the provided payload.
+      operationId: updateUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            examples:
+              update:
+                value:
+                  name: Ana López Ruiz
+                  email: ana.lr@example.com
+                  age: 31
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                updated:
+                  value:
+                    id: 1
+                    name: Ana López Ruiz
+                    email: ana.lr@example.com
+                    age: 31
+                    createdAt: '2025-01-15T10:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - Users
+      summary: Delete user
+      description: Permanently deletes the user with the given ID. No response body on success.
+      operationId: deleteUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: User deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT obtained from the authentication service. Include as:
+        `Authorization: Bearer <token>`
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: Unique identifier of the user
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+
+    Page:
+      name: page
+      in: query
+      description: Page number (1-based)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      example: 1
+
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 10
+
+    Search:
+      name: search
+      in: query
+      required: false
+      description: Filter users by partial match on name or email
+      schema:
+        type: string
+        minLength: 1
+      example: ana
+
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - createdAt
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          example: 1
+        name:
+          type: string
+          minLength: 2
+          example: Ana López
+        email:
+          type: string
+          format: email
+          example: ana@example.com
+        age:
+          type: integer
+          minimum: 0
+          nullable: true
+          example: 30
+        createdAt:
+          type: string
+          format: date-time
+          example: '2025-01-15T10:00:00.000Z'
+
+    CreateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 0
+
+    UpdateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 0
+
+    PaginatedUsersResponse:
+      type: object
+      required:
+        - data
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - uptime
+      properties:
+        status:
+          type: string
+          example: ok
+        uptime:
+          type: number
+          format: float
+          description: Process uptime in seconds
+          example: 3600.42
+
+    ErrorResponse:
+      type: object
+      required:
+        - message
+        - code
+      properties:
+        message:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+        details:
+          description: Optional structured validation or diagnostic details
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items: {}
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters or body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validation:
+              value:
+                message: Validation failed
+                code: VALIDATION_ERROR
+                details:
+                  field: email
+                  issue: must be a valid email address
+
+    Unauthorized:
+      description: Missing or invalid JWT Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missingToken:
+              value:
+                message: Authentication required
+                code: UNAUTHORIZED
+
+    NotFound:
+      description: Requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            userNotFound:
+              value:
+                message: User not found
+                code: USER_NOT_FOUND
+
+    InternalServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            generic:
+              value:
+                message: Internal server error
+                code: INTERNAL_ERROR
