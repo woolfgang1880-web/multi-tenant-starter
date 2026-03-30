@@ -13,10 +13,19 @@ import {
 import DashboardLayout from './components/layout/DashboardLayout.jsx'
 import HealthCheck from './components/HealthCheck.jsx'
 import LoginPage from './pages/LoginPage.jsx'
+import SubscriptionExpiredPage from './pages/SubscriptionExpiredPage.jsx'
 import DashboardHome from './pages/DashboardHome.jsx'
 import UsersPage from './pages/UsersPage.jsx'
 import PlatformAdminPage from './pages/PlatformAdminPage.jsx'
-import { currentPath, isProtectedRoute, navigate, routeToSection, sectionToRoute, subscribeRouteChange } from './routes/router.js'
+import {
+  currentPath,
+  isProtectedRoute,
+  navigate,
+  ROUTES,
+  routeToSection,
+  sectionToRoute,
+  subscribeRouteChange,
+} from './routes/router.js'
 import { canViewUsers } from './utils/authz.js'
 
 export default function App() {
@@ -24,6 +33,7 @@ export default function App() {
   const [user, setUser] = useState(() => getStoredUser())
   const [loginSuccess, setLoginSuccess] = useState(false)
   const [activeSection, setActiveSection] = useState(() => routeToSection(currentPath()))
+  const [routePath, setRoutePath] = useState(() => currentPath())
   const [bootingAuth, setBootingAuth] = useState(() => !!getToken())
 
   const isFirstAuthEffect = useRef(true)
@@ -44,11 +54,16 @@ export default function App() {
           setUser(getStoredUser())
           setAuthed(true)
         }
-      } catch {
+      } catch (err) {
         if (!active) return
-        clearSession({ reason: 'session_invalid', showMessage: true })
-        setAuthed(false)
-        setUser(null)
+        if (err && typeof err === 'object' && err.code === 'SUBSCRIPTION_EXPIRED') {
+          setAuthed(false)
+          setUser(null)
+        } else {
+          clearSession({ reason: 'session_invalid', showMessage: true })
+          setAuthed(false)
+          setUser(null)
+        }
       } finally {
         if (active) setBootingAuth(false)
       }
@@ -68,6 +83,7 @@ export default function App() {
 
   useEffect(() => {
     return subscribeRouteChange((pathname) => {
+      setRoutePath(pathname)
       setActiveSection(routeToSection(pathname))
     })
   }, [])
@@ -78,7 +94,7 @@ export default function App() {
       navigate('/login')
       return
     }
-    if (authed && path === '/login') {
+    if (authed && (path === ROUTES.LOGIN || path === ROUTES.SUBSCRIPTION_EXPIRED)) {
       navigate('/dashboard')
       return
     }
@@ -119,10 +135,14 @@ export default function App() {
               </span>
               <div>
                 <h1 className="dash-login-brand__title">Ohtli</h1>
-                <p className="dash-login-brand__sub">Inicia sesión para continuar</p>
+                <p className="dash-login-brand__sub">
+                  {routePath === ROUTES.SUBSCRIPTION_EXPIRED
+                    ? 'Acceso bloqueado'
+                    : 'Inicia sesión para continuar'}
+                </p>
               </div>
             </div>
-            <LoginPage />
+            {routePath === ROUTES.SUBSCRIPTION_EXPIRED ? <SubscriptionExpiredPage /> : <LoginPage />}
           </div>
         </div>
       ) : (

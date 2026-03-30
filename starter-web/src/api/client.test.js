@@ -5,11 +5,88 @@ import {
   API_REFRESH_TOKEN_KEY,
   API_USER_KEY,
   buildAuthErrorDebugReport,
+  buildPlatformTenantCreateDebugReport,
   login,
   logout,
+  requestSubscriptionActivation,
   selectLoginTenant,
   switchSessionTenant,
 } from './client.js'
+
+describe('requestSubscriptionActivation', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
+  it('POST público sin token llama /subscription/request-activation', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: 'OK',
+          message: 'ok',
+          data: { received: true },
+        }),
+        { status: 201 },
+      ),
+    )
+
+    const out = await requestSubscriptionActivation({ tenant_codigo: 'DEFAULT' })
+    expect(out).toMatchObject({ received: true })
+
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url).toMatch(/\/api\/v1\/subscription\/request-activation$/)
+
+    fetchMock.mockRestore()
+  })
+})
+
+describe('SUBSCRIPTION_EXPIRED (API)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+  })
+
+  it('403 SUBSCRIPTION_EXPIRED en apiFetch limpia sesión y navega a #/subscription-expired', async () => {
+    localStorage.setItem(API_ACCESS_TOKEN_KEY, 'tok')
+    localStorage.setItem(API_USER_KEY, JSON.stringify({ id: 1 }))
+    window.location.hash = '#/dashboard'
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 'SUBSCRIPTION_EXPIRED', message: 'Trial' }), { status: 403 }),
+    )
+
+    await expect(apiFetch('/auth/me')).rejects.toMatchObject({ code: 'SUBSCRIPTION_EXPIRED' })
+
+    expect(localStorage.getItem(API_ACCESS_TOKEN_KEY)).toBeNull()
+    expect(window.location.hash).toBe('#/subscription-expired')
+
+    fetchMock.mockRestore()
+  })
+
+  it('tras 401, refresh 403 SUBSCRIPTION_EXPIRED redirige sin aviso genérico de sesión', async () => {
+    localStorage.setItem(API_ACCESS_TOKEN_KEY, 'old')
+    localStorage.setItem(API_REFRESH_TOKEN_KEY, 'ref')
+    window.location.hash = '#/users'
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UNAUTHENTICATED', message: 'x' }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'SUBSCRIPTION_EXPIRED', message: 'Trial fin' }), { status: 403 }),
+      )
+
+    await expect(apiFetch('/users')).rejects.toMatchObject({ code: 'SUBSCRIPTION_EXPIRED' })
+
+    expect(localStorage.getItem(API_ACCESS_TOKEN_KEY)).toBeNull()
+    expect(window.location.hash).toBe('#/subscription-expired')
+    expect(sessionStorage.getItem(API_AUTH_NOTICE_KEY)).toBeNull()
+
+    fetchMock.mockRestore()
+  })
+})
 
 describe('buildAuthErrorDebugReport', () => {
   it('incluye pistas y metadatos sin contraseña de contexto', () => {
@@ -23,6 +100,29 @@ describe('buildAuthErrorDebugReport', () => {
     expect(r.apiCode).toBe('INVALID_CREDENTIALS')
     expect(Array.isArray(r.hints)).toBe(true)
     expect(r.hints.length).toBeGreaterThan(0)
+  })
+})
+
+describe('buildPlatformTenantCreateDebugReport', () => {
+  it('422 marca capa starter-core y conserva errores de validación', () => {
+    const err = new Error('Los datos enviados no son válidos.')
+    err.status = 422
+    err.code = 'VALIDATION_ERROR'
+    err.requestPath = '/platform/tenants'
+    err.body = { code: 'VALIDATION_ERROR', data: { errors: { codigo: ['ya existe'] } } }
+    const r = buildPlatformTenantCreateDebugReport(err, {
+      formBlockers: ['test'],
+      payloadPreview: { codigo: 'X', nombre: 'Y' },
+    })
+    expect(r.capa_probable).toContain('starter-core')
+    expect(r.httpStatus).toBe(422)
+    expect(r.motivos_boton_deshabilitado).toEqual(['test'])
+  })
+
+  it('sin err y con clientOnlyMessage marca capa web', () => {
+    const r = buildPlatformTenantCreateDebugReport(null, { clientOnlyMessage: 'RFC inválido' })
+    expect(r.capa_probable).toContain('starter-web')
+    expect(r.validacion_previa_navegador).toBe('RFC inválido')
   })
 })
 

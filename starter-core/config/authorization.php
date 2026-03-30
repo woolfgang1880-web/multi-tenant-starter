@@ -16,6 +16,7 @@ return [
     'abilities' => [
         'manage_users' => ['super_admin', 'admin'],
         'manage_roles' => ['super_admin', 'admin'],
+        'manage_tenant_company' => ['admin'],
     ],
 
 ];

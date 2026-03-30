@@ -14,6 +14,16 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $profile = env('SEED_PROFILE', 'full');
+
+        if ($profile === 'minimal') {
+            $this->call([
+                MinimalDevSeeder::class,
+            ]);
+
+            return;
+        }
+
         $this->call([
             TenantSeeder::class,
             RoleSeeder::class,

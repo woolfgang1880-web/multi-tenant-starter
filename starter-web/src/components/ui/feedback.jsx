@@ -1,11 +1,13 @@
-export function InlineAlert({ kind = 'error', children, dismissLabel, onDismiss }) {
+export function InlineAlert({ kind = 'error', children, dismissLabel, onDismiss, ...props }) {
   const klass =
     kind === 'success'
       ? 'dash-alert dash-alert--success'
-      : 'dash-alert dash-alert--error'
+      : kind === 'warning'
+        ? 'dash-alert dash-alert--warning'
+        : 'dash-alert dash-alert--error'
 
   return (
-    <div className={klass} role="alert">
+    <div className={klass} role="alert" {...props}>
       <span>{children}</span>
       {onDismiss && (
         <button type="button" className="dash-alert__dismiss" onClick={onDismiss}>

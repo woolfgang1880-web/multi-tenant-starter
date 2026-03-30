@@ -30,7 +30,7 @@ describe('DashboardLayout auth UI', () => {
     expect(screen.getByText('Empresa: DEFAULT')).toBeInTheDocument()
     const profileBtn = screen.getByRole('button', { name: /admin_demo/i })
     fireEvent.click(profileBtn)
-    const logoutBtn = screen.getByRole('button', { name: /log out/i })
+    const logoutBtn = screen.getByRole('button', { name: /cerrar sesión/i })
     expect(logoutBtn).toBeInTheDocument()
     fireEvent.click(logoutBtn)
     expect(onLogout).toHaveBeenCalled()

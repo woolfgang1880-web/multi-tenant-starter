@@ -22,6 +22,7 @@ class TenantFactory extends Factory
             'nombre' => fake()->company(),
             'slug' => fake()->unique()->slug(),
             'activo' => true,
+            'operational_status' => Tenant::OPERATIONAL_ACTIVE,
         ];
     }
 }

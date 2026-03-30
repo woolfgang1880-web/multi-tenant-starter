@@ -2,10 +2,15 @@
 
 namespace App\Services\Users;
 
+use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Auth\UserAccessRevoker;
+use App\Support\Api\ApiResponse;
+use App\Support\Auth\AuthErrorCode;
 use App\Support\Logging\AdminAuditLogger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
@@ -15,13 +20,52 @@ final class UserService
         private readonly UserAccessRevoker $accessRevoker,
     ) {}
 
-    public function paginateForTenant(int $tenantId, int $perPage = 15): LengthAwarePaginator
+    /**
+     * Misma definición de pertenencia que el listado de usuarios del tenant (paginateForTenant / findForTenantOrFail).
+     */
+    public function queryForTenantMembers(int $tenantId): Builder
     {
         return User::query()
             ->where(function ($q) use ($tenantId) {
                 $q->where('tenant_id', $tenantId)
                     ->orWhereHas('tenants', fn ($t) => $t->where('tenants.id', $tenantId));
-            })
+            });
+    }
+
+    public function countMembersForTenant(int $tenantId): int
+    {
+        return $this->queryForTenantMembers($tenantId)->count();
+    }
+
+    /**
+     * En estado comercial trial solo puede existir un usuario en total en la organización.
+     */
+    public function ensureCanCreateUserForTenant(int $tenantId): void
+    {
+        $tenant = Tenant::query()->find($tenantId);
+        if ($tenant === null) {
+            return;
+        }
+
+        if ($tenant->subscription_status !== Tenant::SUBSCRIPTION_TRIAL) {
+            return;
+        }
+
+        if ($this->countMembersForTenant($tenantId) >= 1) {
+            throw new HttpResponseException(
+                ApiResponse::make(
+                    AuthErrorCode::TRIAL_USER_LIMIT_REACHED,
+                    'En periodo de prueba solo puede existir un usuario. Active un plan o contacte al administrador para agregar más usuarios.',
+                    null,
+                    403
+                )
+            );
+        }
+    }
+
+    public function paginateForTenant(int $tenantId, int $perPage = 15): LengthAwarePaginator
+    {
+        return $this->queryForTenantMembers($tenantId)
             ->with(['roles:id,nombre,slug,tenant_id'])
             ->orderByDesc('id')
             ->paginate($perPage);
@@ -29,11 +73,7 @@ final class UserService
 
     public function findForTenantOrFail(int $tenantId, int $userId): User
     {
-        return User::query()
-            ->where(function ($q) use ($tenantId) {
-                $q->where('tenant_id', $tenantId)
-                    ->orWhereHas('tenants', fn ($t) => $t->where('tenants.id', $tenantId));
-            })
+        return $this->queryForTenantMembers($tenantId)
             ->with(['roles:id,nombre,slug,tenant_id'])
             ->whereKey($userId)
             ->firstOrFail();
@@ -41,6 +81,8 @@ final class UserService
 
     public function create(int $tenantId, array $data, int $actorUserId): User
     {
+        $this->ensureCanCreateUserForTenant($tenantId);
+
         return DB::transaction(function () use ($tenantId, $data, $actorUserId) {
             $user = User::query()->create([
                 'tenant_id' => $tenantId,

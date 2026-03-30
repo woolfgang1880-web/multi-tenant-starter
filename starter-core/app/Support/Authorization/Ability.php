@@ -16,4 +16,10 @@ final class Ability
      * Permite acciones de plataforma sin depender del tenant activo.
      */
     public const MANAGE_PLATFORM = 'manage-platform';
+
+    /**
+     * Edición / inactivación / reactivación operativa de la empresa (Tenant).
+     * Roles admin/super_admin en el tenant; opcionalmente platform admin (Gate).
+     */
+    public const MANAGE_TENANT_COMPANY = 'manage-tenant-company';
 }

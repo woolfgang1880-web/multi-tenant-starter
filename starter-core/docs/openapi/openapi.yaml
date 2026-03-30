@@ -29,6 +29,8 @@ tags:
     description: Usuarios del tenant (requiere rol administrativo)
   - name: Roles
     description: Roles del tenant (requiere rol administrativo)
+  - name: Empresa
+    description: Datos editables de empresa en contexto tenant
 
 paths:
   /api/v1/health:
@@ -425,6 +427,8 @@ paths:
     post:
       tags: [Users]
       summary: Crear usuario
+      description: |
+        En estado comercial **trial** de la organización solo puede existir **un** usuario; un segundo alta responde **403** con `code` **TRIAL_USER_LIMIT_REACHED** (además del **403** habitual sin capacidad `manage-users`: `FORBIDDEN`).
       operationId: usersStore
       security:
         - bearerAuth: []
@@ -444,7 +448,24 @@ paths:
         "401":
           $ref: "#/components/responses/SessionOrAuth401"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: Sin capacidad manage-users (`FORBIDDEN`) o límite de usuarios en trial (`TRIAL_USER_LIMIT_REACHED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              examples:
+                forbidden:
+                  summary: Sin rol / gate
+                  value:
+                    code: FORBIDDEN
+                    message: Acceso denegado.
+                    data: null
+                trialUserLimit:
+                  summary: Trial — ya existe un usuario en la organización
+                  value:
+                    code: TRIAL_USER_LIMIT_REACHED
+                    message: En periodo de prueba solo puede existir un usuario. Active un plan o contacte al administrador para agregar más usuarios.
+                    data: null
         "422":
           $ref: "#/components/responses/ValidationError"
         "429":
@@ -692,6 +713,61 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/tenant/company:
+    patch:
+      tags: [Empresa]
+      summary: Actualizar datos editables de empresa (tenant)
+      description: |
+        Requiere **Bearer** + `tenant.context` + `active.api.session` + **`commercially.operable`** + **`can:manage-tenant-company`**.
+
+        **Autorización (solo API tenant):** únicamente usuarios con rol **`admin`** en el **tenant activo** (config `authorization.abilities.manage_tenant_company` = `['admin']`).
+        **No** pueden usar esta ruta (respuesta **403** cuando el fallo es de Gate / permiso): rol **`user`**, usuario **sin** rol en el tenant, o usuario con **`is_platform_admin`** que **no** tenga rol **`admin`** en ese tenant (la bandera de plataforma **no** sustituye al rol en esta ruta).
+
+        **Separación con la API plataforma:** la edición como operador de plataforma (soporte / backoffice) debe hacerse con **`PATCH /api/v1/platform/tenants/{tenant_codigo}`** y autorización **`manage-platform`**, no con este endpoint.
+      operationId: tenantCompanyPatch
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Actualización parcial; validación y campos permitidos en `UpdateTenantCompanyRequest` (el backend elimina campos inmutables).
+      responses:
+        "200":
+          description: Empresa actualizada (`code` = `OK`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message, data]
+                properties:
+                  code:
+                    type: string
+                    example: OK
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    nullable: true
+        "401":
+          $ref: "#/components/responses/SessionOrAuth401"
+        "403":
+          description: |
+            Autenticado pero sin **`manage-tenant-company`** en el tenant activo (p. ej. rol `user`, sin rol, o `is_platform_admin` sin rol `admin`), u otros 403 del stack (p. ej. reglas comerciales / suscripción según middleware).
+            En denegación por autorización, el envelope suele llevar `code` = **`FORBIDDEN`**.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiEnvelopeError"
+              example:
+                code: FORBIDDEN
+                message: Acceso denegado.
+                data: null
         "422":
           $ref: "#/components/responses/ValidationError"
 

@@ -48,6 +48,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'tenant.context' => \App\Http\Middleware\ResolveTenantContext::class,
             'active.api.session' => \App\Http\Middleware\EnsureActiveApiSession::class,
+            'commercially.operable' => \App\Http\Middleware\EnsureCommerciallyOperable::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

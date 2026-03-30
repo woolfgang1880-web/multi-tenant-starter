@@ -2,7 +2,7 @@
 
 ## Visión general
 
-Módulo **API-first** para administrar usuarios y roles dentro del **tenant actual** (resuelto por `tenant.context` tras autenticación). Sin permisos granulares aún: cualquier usuario autenticado con sesión activa puede usar estos endpoints (en fases posteriores conviene políticas por rol).
+Módulo **API-first** para administrar usuarios y roles dentro del **tenant actual** (resuelto por `tenant.context` tras autenticación). El acceso exige **Gates** (`manage-users`, `manage-roles`) según roles del tenant (`config/authorization.php`); no hay permisos granulares por acción aún (evolución posible en productos derivados).
 
 ## Multi-tenant
 
@@ -46,7 +46,7 @@ Los `role_ids` deben existir en `roles` del mismo tenant (`exists` en FormReques
 
 ## Seguridad y middleware
 
-Rutas bajo: `auth:sanctum`, `tenant.context`, `active.api.session`.
+Rutas bajo: `auth:sanctum`, `tenant.context`, `active.api.session`, **`commercially.operable`**, y **`can:manage-users`** o **`can:manage-roles`** según corresponda.
 
 - Validación con Form Requests en `App\Http\Requests\Api\V1\...`.
 - Lógica en `UserService`, `RoleService`, `UserRoleAssignmentService`.

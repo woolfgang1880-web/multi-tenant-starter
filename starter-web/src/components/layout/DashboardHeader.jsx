@@ -126,6 +126,7 @@ export default function DashboardHeader({ user, onLogout, theme, onThemeChange, 
           <button
             type="button"
             className="dash-header__profile"
+            data-testid="header-profile-toggle"
             aria-haspopup="menu"
             aria-expanded={profileOpen}
             onClick={handleToggleProfile}
@@ -146,8 +147,9 @@ export default function DashboardHeader({ user, onLogout, theme, onThemeChange, 
                 variant="outline"
                 className="dash-btn--header dash-header__logout-btn"
                 onClick={onLogout}
+                data-testid="header-logout"
               >
-                Log out
+                Cerrar sesión
               </Button>
             </div>
           )}

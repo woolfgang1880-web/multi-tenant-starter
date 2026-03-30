@@ -170,6 +170,6 @@ npm test -- --run src/App.tenant-switch-ui.test.jsx
 
 ## 9. Pendientes (tras fase 3)
 
-- Enforcement **trial** / bloqueo por suscripción si aplica (fase 5 / `MULTI_TENANT_EVOLUTION`).
+- Enforcement **trial** / bloqueo por suscripción: ver [TRIAL_SUBSCRIPTION.md](./TRIAL_SUBSCRIPTION.md) (fase 1 implementada en `AuthSessionService`).
 - E2E browser opcionales (login global + switch tenant).
 - **Optimistic UI** o invalidación de caché de datos de página al cambiar tenant (hoy el usuario debe saber que el contexto cambió; listas ya cargadas pueden ser del tenant anterior hasta recargar navegación).

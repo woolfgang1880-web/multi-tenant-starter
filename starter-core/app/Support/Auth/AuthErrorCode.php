@@ -28,6 +28,12 @@ final class AuthErrorCode
 
     public const ACCOUNT_INACTIVE = 'ACCOUNT_INACTIVE';
 
+    /** Trial vencido, suscripción expirada o empresa suspendida (acceso API bloqueado). */
+    public const SUBSCRIPTION_EXPIRED = 'SUBSCRIPTION_EXPIRED';
+
+    /** En trial solo se permite un usuario en la organización; no se pueden crear más. */
+    public const TRIAL_USER_LIMIT_REACHED = 'TRIAL_USER_LIMIT_REACHED';
+
     public const TOO_MANY_ATTEMPTS = 'TOO_MANY_ATTEMPTS';
 
     public const FORBIDDEN = 'FORBIDDEN';

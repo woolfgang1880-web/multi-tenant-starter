@@ -52,6 +52,12 @@ final class AuthSessionService
             return ['ok' => false, 'reason' => 'inactive'];
         }
 
+        if (! $tenant->allowsApiAccess()) {
+            SecurityLogger::loginFailed('subscription_blocked', $usuario, $tenantCodigo, $request->ip(), $request->userAgent());
+
+            return ['ok' => false, 'reason' => 'subscription_blocked'];
+        }
+
         return $this->issueSessionTokens($user, $tenant, $request);
     }
 
@@ -131,6 +137,12 @@ final class AuthSessionService
             return ['ok' => false, 'reason' => 'credentials'];
         }
 
+        if (! $tenant->allowsApiAccess()) {
+            SecurityLogger::loginFailed('subscription_blocked', $user->usuario, $tenantCodigo, $request->ip(), $request->userAgent());
+
+            return ['ok' => false, 'reason' => 'subscription_blocked'];
+        }
+
         return $this->issueSessionTokens($user, $tenant, $request);
     }
 
@@ -148,7 +160,9 @@ final class AuthSessionService
             ->whereIn('id', $ids)
             ->where('activo', true)
             ->orderBy('codigo')
-            ->get();
+            ->get()
+            ->filter(fn (Tenant $t) => $t->allowsApiAccess())
+            ->values();
     }
 
     /**
@@ -175,6 +189,12 @@ final class AuthSessionService
             SecurityLogger::tenantSwitchDenied($user->id, $tenant->id, $sessionUuid, 'not_member', $request->ip());
 
             return ['ok' => false, 'reason' => 'forbidden'];
+        }
+
+        if (! $tenant->allowsApiAccess()) {
+            SecurityLogger::tenantSwitchDenied($user->id, $tenant->id, $sessionUuid, 'subscription_blocked', $request->ip());
+
+            return ['ok' => false, 'reason' => 'subscription_blocked'];
         }
 
         return DB::transaction(function () use ($user, $tenant, $sessionUuid, $request) {
@@ -330,6 +350,14 @@ final class AuthSessionService
                 return ['ok' => false, 'reason' => 'invalid'];
             }
 
+            $tenant = $session->tenant_id !== null ? Tenant::query()->find($session->tenant_id) : null;
+            if ($tenant === null || ! $tenant->allowsApiAccess()) {
+                $this->invalidateSessionForTenantAccess($session, $user);
+                SecurityLogger::refreshFailed('subscription_blocked', $request->ip(), $request->userAgent());
+
+                return ['ok' => false, 'reason' => 'subscription_blocked'];
+            }
+
             $accessExpires = now()->addMinutes(config('auth-session.access_ttl_minutes', 60));
 
             PersonalAccessToken::query()
@@ -371,6 +399,26 @@ final class AuthSessionService
                 'session_uuid' => $session->session_uuid,
             ];
         });
+    }
+
+    private function invalidateSessionForTenantAccess(UserSession $session, User $user): void
+    {
+        $session->forceFill([
+            'is_active' => false,
+            'invalidated_at' => now(),
+            'invalidation_reason' => 'subscription_blocked',
+        ])->save();
+
+        RefreshToken::query()
+            ->where('user_session_id', $session->id)
+            ->whereNull('revoked_at')
+            ->update(['revoked_at' => now()]);
+
+        PersonalAccessToken::query()
+            ->where('tokenable_id', $user->id)
+            ->where('tokenable_type', $user->getMorphClass())
+            ->where('name', $session->session_uuid)
+            ->delete();
     }
 
     private function invalidateSessionOnReuse(RefreshToken $record, Request $request): void

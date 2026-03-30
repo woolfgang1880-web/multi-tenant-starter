@@ -24,6 +24,7 @@ export default function AppSidebar({ user, activeSection, onNavigate, sidebarOpe
           <button
             key={id}
             type="button"
+            data-testid={`nav-${id}`}
             className={`dash-nav__item ${activeSection === id ? 'dash-nav__item--active' : ''}`}
             onClick={() => {
               onNavigate(id)

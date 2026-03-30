@@ -63,10 +63,23 @@ class AppServiceProvider extends ServiceProvider
             // Global (sin depender del tenant activo normal).
             return (bool) $user->is_platform_admin;
         });
+
+        Gate::define(Ability::MANAGE_TENANT_COMPANY, function (User $user): bool {
+            $slugs = config('authorization.abilities.manage_tenant_company', []);
+
+            return $user->hasAnyRoleSlug($slugs);
+        });
     }
 
     private function configureRateLimiting(): void
     {
+        RateLimiter::for('subscription-activation', function (Request $request) {
+            $max = 10;
+            $decay = 60;
+
+            return (new Limit('', $max, $decay))->by('subscription-activation:'.sha1((string) $request->ip()));
+        });
+
         RateLimiter::for('auth-login-select', function (Request $request) {
             $cfg = config('rate_limiting.auth_login', []);
             $max = (int) ($cfg['max_attempts'] ?? 5);

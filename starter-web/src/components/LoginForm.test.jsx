@@ -4,10 +4,20 @@ import LoginForm from './LoginForm.jsx'
 
 const loginMock = vi.fn()
 const selectLoginTenantMock = vi.fn()
+const clearSessionMock = vi.fn()
+const navigateMock = vi.fn()
 
 vi.mock('../api/client.js', () => ({
   login: (...args) => loginMock(...args),
   selectLoginTenant: (...args) => selectLoginTenantMock(...args),
+  buildAuthErrorDebugReport: () => ({}),
+  getApiBaseUrl: () => 'http://localhost:8000/api/v1',
+  clearSession: (...args) => clearSessionMock(...args),
+}))
+
+vi.mock('../routes/router.js', () => ({
+  ROUTES: { LOGIN: '/login', SUBSCRIPTION_EXPIRED: '/subscription-expired' },
+  navigate: (...args) => navigateMock(...args),
 }))
 
 describe('LoginForm', () => {
@@ -55,6 +65,22 @@ describe('LoginForm', () => {
         password: 'Admin123!',
       })
     })
+  })
+
+  it('SUBSCRIPTION_EXPIRED redirige a la vista de acceso bloqueado', async () => {
+    loginMock.mockRejectedValueOnce({ code: 'SUBSCRIPTION_EXPIRED', status: 403 })
+    render(<LoginForm />)
+
+    fireEvent.change(screen.getByLabelText(/Código de empresa \(opcional\)/i), { target: { value: 'DEFAULT' } })
+    fireEvent.change(screen.getByLabelText(/^Usuario$/i), { target: { value: 'u' } })
+    fireEvent.change(screen.getByLabelText(/Contrasena/i), { target: { value: 'p' } })
+    fireEvent.submit(screen.getByRole('button', { name: /Entrar/i }).closest('form'))
+
+    await waitFor(() => {
+      expect(clearSessionMock).toHaveBeenCalledWith({ showMessage: false })
+      expect(navigateMock).toHaveBeenCalledWith('/subscription-expired', { replace: true })
+    })
+    expect(screen.queryByText(/Empresa, usuario o contraseña incorrectos/i)).not.toBeInTheDocument()
   })
 
   it('muestra error cuando login es invalido', async () => {

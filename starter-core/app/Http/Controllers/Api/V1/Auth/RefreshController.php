@@ -38,6 +38,15 @@ final class RefreshController extends Controller
                 );
             }
 
+            if ($reason === 'subscription_blocked') {
+                return ApiResponse::make(
+                    AuthErrorCode::SUBSCRIPTION_EXPIRED,
+                    'El periodo de prueba de esta empresa ha finalizado o el acceso no está disponible. Vuelva a iniciar sesión.',
+                    null,
+                    403
+                );
+            }
+
             return ApiResponse::make(
                 AuthErrorCode::REFRESH_INVALID,
                 'Token de renovación inválido o revocado.',

@@ -31,6 +31,15 @@ final class LoginSelectTenantController extends Controller
                 );
             }
 
+            if (($result['reason'] ?? '') === 'subscription_blocked') {
+                return ApiResponse::make(
+                    AuthErrorCode::SUBSCRIPTION_EXPIRED,
+                    'El periodo de prueba de esta empresa ha finalizado o el acceso no está disponible.',
+                    null,
+                    403
+                );
+            }
+
             return ApiResponse::make(
                 AuthErrorCode::INVALID_CREDENTIALS,
                 'Empresa no válida o sin acceso.',

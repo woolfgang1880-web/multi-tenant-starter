@@ -14,7 +14,7 @@
 - Header muestra:
   - nombre del usuario autenticado
   - tenant actual (si viene en `auth/me` y se guarda en estado)
-  - boton `Log out` consistente
+  - boton `Cerrar sesión` consistente
 
 ## 3) Autorizacion UI (UX)
 

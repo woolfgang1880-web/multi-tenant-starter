@@ -35,6 +35,8 @@ function sessionNoticeFor(reason) {
 }
 
 vi.mock('./api/client.js', () => ({
+  getApiBaseUrl: () => 'http://localhost:8000/api/v1',
+  buildAuthErrorDebugReport: () => ({}),
   getToken: () => state.token,
   getStoredUser: () => state.user,
   setStoredUser: (user) => {

@@ -25,6 +25,12 @@ A continuación se validó el comportamiento real en backend con tests E2E y la 
 - En `starter-web`, el menú **Plataforma** se muestra usando ese flag.
 - El super admin puede llamar a los endpoints de plataforma.
 
+### A.1) LISTADO DE EMPRESAS (UX)
+- Endpoint: `GET /api/v1/platform/tenants`
+- La UI de **Plataforma** carga y muestra el listado (código, nombre, estado) para:
+  - validar visualmente qué empresas existen
+  - evitar capturar el código “a ciegas” al crear el admin inicial
+
 ### B) CREACIÓN DE TENANT
 - Endpoint: `POST /api/v1/platform/tenants`
 - Se valida que el `codigo` sea único (caso duplicado devuelve `422` con `code: VALIDATION_ERROR`).
@@ -82,21 +88,27 @@ A continuación se validó el comportamiento real en backend con tests E2E y la 
    - `Usuario`: `admin_demo`
    - `Contraseña`: `Admin123!`
 3. Valida que aparezca el menú **Plataforma**.
+4. Entra a **Plataforma** y confirma que ves “Empresas existentes” (usa “Actualizar listado”).
 
 ### 3) Crear empresa/tenant
 En la sección **Plataforma**:
 1. Formulario “Crear empresa”:
    - `Nombre`: “Tenant X”
-   - `Código de empresa`: usa un valor único (ej. `TENANTX`)
+   - `Código`: usa un valor único (ej. `TENANTX`)
    - `Activo`: Sí
 2. Ejecuta “Crear empresa”.
+3. Confirma que aparece en el listado de “Empresas existentes”.
 
 ### 4) Crear admin inicial
 En el formulario “Crear admin inicial”:
-1. `Código de empresa`: `TENANTX`
+1. `Código de empresa`: selecciona `TENANTX` del desplegable
 2. `Admin usuario`: `admin_tenantx`
 3. `Admin contraseña`: una contraseña válida (mínimo 8 chars; ej. `Admin1234!`)
 4. Clic en “Crear admin inicial”.
+
+### 4.1) Validaciones UX esperadas
+- Si intentas crear una empresa con `Código` repetido, debe mostrar un error claro de duplicado.
+- Si intentas crear un admin con `Admin usuario` repetido, debe mostrar un error claro de duplicado.
 
 ### 5) Validar login del admin creado
 1. Cierra sesión / limpia tokens (o abre una sesión nueva).
@@ -113,5 +125,9 @@ En el formulario “Crear admin inicial”:
 - Frontend (UI mínima): tests existentes en `starter-web/src/components/layout` y `starter-web/src/pages`.
 
 ## Qué quedó pendiente
-- Validación UI “real” de login del admin recién creado en un test de integración completo sin mocks (browser/E2E). Para desarrollo, los checks actuales cubren el comportamiento por contrato y por payload.
+- (Opcional) ampliar el E2E browser con más casos (multi-empresa, errores de validación repetidos, etc.).
+
+## E2E browser (Playwright) — sin mocks
+- Documentación: `starter-web/docs/E2E_PLATFORM.md`
+- Test: `starter-web/e2e/platform-flow.spec.js`
 

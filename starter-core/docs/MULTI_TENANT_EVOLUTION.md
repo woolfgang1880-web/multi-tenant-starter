@@ -37,7 +37,7 @@
 ### D. Trial y bloqueo
 
 - **Fase 1:** columnas en `tenants` (`trial_starts_at`, `trial_ends_at`, `subscription_status`) — datos listos, **sin** bloqueo automático aún.
-- **Fase 3:** middleware `EnsureTenantSubscriptionActive` (o chequeo en `AuthSessionService` + respuestas 403 coherentes) cuando `subscription_status` = `expired` o fecha pasada.
+- **Fase 3 (trial / suscripción):** enforcement en `AuthSessionService` + respuestas **403** `SUBSCRIPTION_EXPIRED`. Detalle: [TRIAL_SUBSCRIPTION.md](./TRIAL_SUBSCRIPTION.md). Middleware en cada request: pendiente (roadmap en ese doc).
 
 ### E. Usuario único global
 

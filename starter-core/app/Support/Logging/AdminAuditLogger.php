@@ -155,4 +155,31 @@ final class AdminAuditLogger
             'tenant_id' => $tenantId,
         ]);
     }
+
+    public static function tenantCompanyUpdated(int $actorUserId, int $targetTenantId): void
+    {
+        Log::channel(self::CHANNEL)->info('admin.tenant_company.updated', [
+            ...self::context('admin.tenant_company.updated', 'info', $actorUserId, $targetTenantId, 'tenant', $targetTenantId),
+            'actor_user_id' => $actorUserId,
+            'target_tenant_id' => $targetTenantId,
+        ]);
+    }
+
+    public static function tenantCompanyInactivated(int $actorUserId, int $targetTenantId): void
+    {
+        Log::channel(self::CHANNEL)->notice('admin.tenant_company.inactivated', [
+            ...self::context('admin.tenant_company.inactivated', 'notice', $actorUserId, $targetTenantId, 'tenant', $targetTenantId),
+            'actor_user_id' => $actorUserId,
+            'target_tenant_id' => $targetTenantId,
+        ]);
+    }
+
+    public static function tenantCompanyReactivated(int $actorUserId, int $targetTenantId): void
+    {
+        Log::channel(self::CHANNEL)->info('admin.tenant_company.reactivated', [
+            ...self::context('admin.tenant_company.reactivated', 'info', $actorUserId, $targetTenantId, 'tenant', $targetTenantId),
+            'actor_user_id' => $actorUserId,
+            'target_tenant_id' => $targetTenantId,
+        ]);
+    }
 }

@@ -21,6 +21,7 @@ final class PlatformTenantCreateController extends Controller
             'nombre' => $tenant->nombre,
             'slug' => $tenant->slug,
             'activo' => $tenant->activo,
+            'operational_status' => $tenant->operational_status,
         ], 201);
     }
 }

@@ -6,6 +6,11 @@ export function mapApiError(err, fallback = 'Error desconocido') {
   }
 
   if (err.status === 403) {
+    if (err.code === 'SUBSCRIPTION_EXPIRED') {
+      return typeof err.message === 'string' && err.message
+        ? err.message
+        : 'El periodo de prueba de esta empresa ha finalizado o el acceso no esta disponible.'
+    }
     return 'No tienes permisos para esta accion.'
   }
 

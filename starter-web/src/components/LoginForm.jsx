@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { buildAuthErrorDebugReport, getApiBaseUrl, login, selectLoginTenant } from '../api/client.js'
+import { clearSession, getApiBaseUrl, login, selectLoginTenant } from '../api/client.js'
+import { DEBUG_UI_ENABLED } from '../utils/debugUi.js'
+import { navigate, ROUTES } from '../routes/router.js'
 import Button from './ui/Button.jsx'
 import { Field, SelectInput, TextInput } from './ui/Field.jsx'
 
@@ -14,8 +16,6 @@ const DEMO_CREDENTIAL_ROWS = [
   { tenant: 'PRUEBAS', usuario: 'user_pruebas1', password: 'UserPruebas123!' },
   { tenant: 'DEFAULT o PRUEBA1', usuario: 'multi_demo', password: 'MultiDemo123!', note: 'Misma contraseña; login global = vaciar empresa' },
 ]
-
-const isViteDevelopment = import.meta.env.MODE === 'development'
 
 function mapLoginError(err) {
   if (!err || typeof err !== 'object') {
@@ -55,8 +55,13 @@ function mapLoginError(err) {
   if (err.status >= 500) {
     return 'El servidor devolvió un error. Comprueba que la API esté en marcha y revisa los logs del servidor.'
   }
-  if (err instanceof TypeError && typeof err.message === 'string' && /fetch|network/i.test(err.message)) {
-    return 'No hay conexión con la API. Comprueba la URL (VITE_API_BASE_URL) y que el servidor esté activo.'
+  const msgLower = typeof err.message === 'string' ? err.message.toLowerCase() : ''
+  if (
+    err.isNetworkError === true ||
+    (err instanceof TypeError && msgLower && /fetch|network/i.test(msgLower)) ||
+    (msgLower.includes('failed to fetch') || msgLower.includes('networkerror'))
+  ) {
+    return 'No hay conexión con la API (el navegador no llegó al servidor). No es un fallo de usuario o contraseña. Arranca Laravel en starter-core (p. ej. php artisan serve --host=127.0.0.1 --port=8000), revisa VITE_API_BASE_URL y en DevTools → Red mira si la petición a /auth/login aparece en rojo.'
   }
   if (err.message) {
     return err.message
@@ -165,8 +170,14 @@ export default function LoginForm() {
         if (first) setSelectedTenantCodigo(first)
       }
     } catch (err) {
+      if (err && typeof err === 'object' && err.code === 'SUBSCRIPTION_EXPIRED') {
+        clearSession({ showMessage: false })
+        navigate(ROUTES.SUBSCRIPTION_EXPIRED, { replace: true })
+        return
+      }
       setError(mapLoginError(err))
-      if (isViteDevelopment) {
+      if (DEBUG_UI_ENABLED) {
+        const { buildAuthErrorDebugReport } = await import('../api/client.js')
         setDevErrorReport(
           buildAuthErrorDebugReport(err, {
             flow: 'POST /auth/login (+ GET /auth/me si llegó tokens)',
@@ -196,8 +207,14 @@ export default function LoginForm() {
       })
       setSelection(null)
     } catch (err) {
+      if (err && typeof err === 'object' && err.code === 'SUBSCRIPTION_EXPIRED') {
+        clearSession({ showMessage: false })
+        navigate(ROUTES.SUBSCRIPTION_EXPIRED, { replace: true })
+        return
+      }
       setError(mapLoginError(err))
-      if (isViteDevelopment) {
+      if (DEBUG_UI_ENABLED) {
+        const { buildAuthErrorDebugReport } = await import('../api/client.js')
         setDevErrorReport(
           buildAuthErrorDebugReport(err, {
             flow: 'POST /auth/login/select-tenant (+ GET /auth/me)',
@@ -217,11 +234,17 @@ export default function LoginForm() {
         Acceso al panel
       </h2>
       <p className="dash-login-card__hint">
-        Acceso seguro al sistema. Los botones rellenan empresa, usuario y contraseña según los datos demo del API (
-        <code className="dash-login-dev-hint__mono">php artisan app:setup-demo</code>
-        ).
+        Acceso seguro al sistema.
+        {DEBUG_UI_ENABLED ? (
+          <>
+            {' '}
+            Los botones rellenan empresa, usuario y contraseña según los datos demo del API (
+            <code className="dash-login-dev-hint__mono">php artisan app:setup-demo</code>
+            ).
+          </>
+        ) : null}
       </p>
-      {isViteDevelopment && (
+      {DEBUG_UI_ENABLED && (
         <details className="dash-login-dev-hint">
           <summary>Referencia rápida — empresa / usuario / contraseña (solo entorno dev)</summary>
           <p style={{ margin: '0.5rem 0 0', lineHeight: 1.45 }}>
@@ -256,38 +279,40 @@ export default function LoginForm() {
           </div>
         </details>
       )}
-      <div className="dash-form__actions dash-form__actions--row dash-login-shortcuts">
-        <Button type="button" variant="ghost" onClick={useDemoAdmin}>
-          DEFAULT · admin
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoUser}>
-          DEFAULT · usuario
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoManager}>
-          DEFAULT · manager
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoPrueba1Admin}>
-          PRUEBA1 · admin
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoPrueba1User}>
-          PRUEBA1 · usuario
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoPruebasAdmin}>
-          PRUEBAS · admin
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoPruebasUser}>
-          PRUEBAS · usuario
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoMultiDefault}>
-          multi · DEFAULT
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoMultiPrueba1}>
-          multi · PRUEBA1
-        </Button>
-        <Button type="button" variant="ghost" onClick={useDemoGlobalMulti}>
-          global · multi_demo
-        </Button>
-      </div>
+      {DEBUG_UI_ENABLED ? (
+        <div className="dash-form__actions dash-form__actions--row dash-login-shortcuts">
+          <Button type="button" variant="ghost" onClick={useDemoAdmin}>
+            DEFAULT · admin
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoUser}>
+            DEFAULT · usuario
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoManager}>
+            DEFAULT · manager
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoPrueba1Admin}>
+            PRUEBA1 · admin
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoPrueba1User}>
+            PRUEBA1 · usuario
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoPruebasAdmin}>
+            PRUEBAS · admin
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoPruebasUser}>
+            PRUEBAS · usuario
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoMultiDefault}>
+            multi · DEFAULT
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoMultiPrueba1}>
+            multi · PRUEBA1
+          </Button>
+          <Button type="button" variant="ghost" onClick={useDemoGlobalMulti}>
+            global · multi_demo
+          </Button>
+        </div>
+      ) : null}
 
       {error && (
         <div className="dash-alert dash-alert--error" role="alert">
@@ -295,7 +320,7 @@ export default function LoginForm() {
         </div>
       )}
 
-      {isViteDevelopment && devErrorReport && (
+      {DEBUG_UI_ENABLED && devErrorReport && (
         <details className="dash-login-error-debug" open>
           <summary>Diagnóstico extendido (solo desarrollo)</summary>
           <p className="dash-login-error-debug__lead">
@@ -314,6 +339,7 @@ export default function LoginForm() {
             value={tenantCodigo}
             onChange={(e) => setTenantCodigo(e.target.value)}
             placeholder="Vacío = login global; o DEFAULT, PRUEBA1, PRUEBAS…"
+            data-testid="login-tenant-codigo"
           />
         </Field>
         <Field label="Usuario">
@@ -324,6 +350,7 @@ export default function LoginForm() {
             onChange={(e) => setUsuario(e.target.value)}
             required
             placeholder="admin"
+            data-testid="login-usuario"
           />
         </Field>
         <Field label="Contrasena">
@@ -334,10 +361,11 @@ export default function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             required
             placeholder="••••••••"
+            data-testid="login-password"
           />
         </Field>
 
-        <Button type="submit" variant="primary" block loading={submitting} disabled={!!selection}>
+        <Button type="submit" variant="primary" block loading={submitting} disabled={!!selection} data-testid="login-submit">
           {submitting ? 'Entrando…' : 'Entrar'}
         </Button>
       </form>

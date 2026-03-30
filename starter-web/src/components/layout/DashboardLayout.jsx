@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AppSidebar from './AppSidebar.jsx'
 import DashboardHeader from './DashboardHeader.jsx'
+import TenantTrialStatusBanner from '../TenantTrialStatusBanner.jsx'
 
 const DASH_THEME_KEY = 'starter-web_theme'
 const THEMES = new Set(['soft', 'light', 'dark'])
@@ -57,7 +58,10 @@ export default function DashboardLayout({ user, activeSection, onNavigate, onLog
           onCloseSidebar={() => setSidebarOpen(false)}
         />
         {sidebarOpen && <button type="button" className="dash-sidebar-backdrop" aria-label="Cerrar menu" onClick={() => setSidebarOpen(false)} />}
-        <main className="dash-main">{children}</main>
+        <main className="dash-main">
+          <TenantTrialStatusBanner tenant={user?.tenant} />
+          {children}
+        </main>
       </div>
       <footer className="dash-footer" role="contentinfo">
         <span className="dash-footer__brand">FDS FABRICA DEL SOFTWARE</span>

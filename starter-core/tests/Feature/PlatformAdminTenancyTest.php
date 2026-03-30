@@ -49,6 +49,13 @@ class PlatformAdminTenancyTest extends TestCase
             'nombre' => 'Tenant 2',
             'codigo' => 'TENANT2',
             'activo' => true,
+            'origen_datos' => 'manual',
+            'tipo_contribuyente' => 'persona_moral',
+            'rfc' => 'TNT010101AA1',
+            'nombre_fiscal' => 'TENANT DOS SA DE CV',
+            'regimen_fiscal_principal' => '601',
+            'codigo_postal' => '01010',
+            'estado' => 'CDMX',
         ]);
 
         $res->assertCreated()
@@ -61,6 +68,56 @@ class PlatformAdminTenancyTest extends TestCase
         $me = $this->withHeaders($h)->getJson('/api/v1/auth/me');
         $me->assertOk()
             ->assertJsonPath('data.user.is_platform_admin', true);
+    }
+
+    public function test_platform_list_tenants_ok_for_super_admin_global(): void
+    {
+        $this->seed(TenantSeeder::class);
+
+        $default = Tenant::query()->where('codigo', 'DEFAULT')->firstOrFail();
+
+        $super = User::factory()->create([
+            'tenant_id' => $default->id,
+            'usuario' => 'platform_admin',
+            'password_hash' => 'password',
+            'activo' => true,
+            'is_platform_admin' => true,
+        ]);
+
+        $h = $this->authHeader($super, 'DEFAULT');
+
+        $res = $this->withHeaders($h)->getJson('/api/v1/platform/tenants');
+
+        $res->assertOk()
+            ->assertJsonPath('code', 'OK')
+            ->assertJsonPath('data.total', 3);
+
+        $items = $res->json('data.items');
+        $this->assertIsArray($items);
+        $this->assertNotEmpty($items);
+        $this->assertContains('DEFAULT', collect($items)->pluck('codigo')->all());
+    }
+
+    public function test_platform_list_tenants_forbidden_without_super_admin(): void
+    {
+        $this->seed(TenantSeeder::class);
+
+        $default = Tenant::query()->where('codigo', 'DEFAULT')->firstOrFail();
+
+        $user = User::factory()->create([
+            'tenant_id' => $default->id,
+            'usuario' => 'not_platform_admin',
+            'password_hash' => 'password',
+            'activo' => true,
+            'is_platform_admin' => false,
+        ]);
+
+        $h = $this->authHeader($user, 'DEFAULT');
+
+        $res = $this->withHeaders($h)->getJson('/api/v1/platform/tenants');
+
+        $res->assertStatus(403)
+            ->assertJsonPath('code', AuthErrorCode::FORBIDDEN);
     }
 
     public function test_platform_create_tenant_forbidden_without_super_admin(): void
@@ -109,6 +166,13 @@ class PlatformAdminTenancyTest extends TestCase
             'nombre' => 'Tenant 2',
             'codigo' => 'TENANT2',
             'activo' => true,
+            'origen_datos' => 'manual',
+            'tipo_contribuyente' => 'persona_moral',
+            'rfc' => 'TNT010101AA2',
+            'nombre_fiscal' => 'TENANT DOS SA DE CV',
+            'regimen_fiscal_principal' => '601',
+            'codigo_postal' => '01010',
+            'estado' => 'CDMX',
         ]);
         $tenantRes->assertCreated()->assertJsonPath('code', 'OK');
 
@@ -157,6 +221,13 @@ class PlatformAdminTenancyTest extends TestCase
             'nombre' => 'Tenant 2',
             'codigo' => 'TENANT2',
             'activo' => true,
+            'origen_datos' => 'manual',
+            'tipo_contribuyente' => 'persona_moral',
+            'rfc' => 'TNT010101AA3',
+            'nombre_fiscal' => 'TENANT DOS SA DE CV',
+            'regimen_fiscal_principal' => '601',
+            'codigo_postal' => '01010',
+            'estado' => 'CDMX',
         ]);
         $tenantRes->assertCreated()->assertJsonPath('code', 'OK');
 
@@ -209,12 +280,26 @@ class PlatformAdminTenancyTest extends TestCase
             'nombre' => 'Tenant 2',
             'codigo' => 'TENANT2',
             'activo' => true,
+            'origen_datos' => 'manual',
+            'tipo_contribuyente' => 'persona_moral',
+            'rfc' => 'TNT010101AA4',
+            'nombre_fiscal' => 'TENANT DOS SA DE CV',
+            'regimen_fiscal_principal' => '601',
+            'codigo_postal' => '01010',
+            'estado' => 'CDMX',
         ])->assertCreated()->assertJsonPath('code', 'OK');
 
         $this->withHeaders($h)->postJson('/api/v1/platform/tenants', [
             'nombre' => 'Tenant 2 Duplicate',
             'codigo' => 'TENANT2',
             'activo' => true,
+            'origen_datos' => 'manual',
+            'tipo_contribuyente' => 'persona_moral',
+            'rfc' => 'TNT010101AA5',
+            'nombre_fiscal' => 'TENANT DOS SA DE CV',
+            'regimen_fiscal_principal' => '601',
+            'codigo_postal' => '01010',
+            'estado' => 'CDMX',
         ])->assertStatus(422)->assertJsonPath('code', ApiErrorCode::VALIDATION_ERROR);
     }
 }

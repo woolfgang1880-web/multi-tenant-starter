@@ -13,7 +13,7 @@ Repositorio **inicial estable** con dos paquetes que trabajan juntos: API Larave
 
 - **Backend:** PHP 8.2+, Laravel 11, Sanctum (Bearer), sesiones en BD, rate limiting y métricas opcionales.
 - **Front:** React, Vite, React Router, capa API centralizada.
-- **Contrato:** OpenAPI en `starter-core/docs/openapi/openapi.yaml` (fuente de verdad para formas de respuesta y códigos de error en tests de contrato).
+- **Contrato:** OpenAPI en `starter-core/docs/openapi/openapi.yaml` — ver [Política OpenAPI v1](#política-openapi-v1-starter-v1).
 - **Base de datos:** el ejemplo por defecto usa **SQLite** en desarrollo; el mismo código está preparado para **MySQL/MariaDB** en equipos o despliegues que lo requieran (ver `.env.example` en core).
 
 ## Requisitos
@@ -72,13 +72,51 @@ El comando **`php artisan app:setup-demo`** (desde `starter-core`) aplica migrac
 Documentación detallada de usuarios y contraseñas: [`starter-core/docs/DEMO_USERS.md`](starter-core/docs/DEMO_USERS.md).  
 Flujo del comando: [`starter-core/docs/SETUP_DEMO.md`](starter-core/docs/SETUP_DEMO.md).
 
+## Qué se congela en starter v1
+
+Este snapshot (**v1.0.0**) es una **base reusable** para clonar y derivar productos independientes; no sustituye un core compartido entre muchos productos en producción.
+
+- **Incluye:** autenticación, multi-tenant, usuarios/roles, autorización por abilities, empresa/tenant, middleware comercial, rutas plataforma (p. ej. admin inicial), demo, tests y docs (detalle en [`STARTER_SCOPE.md`](STARTER_SCOPE.md)).
+- **No incluye:** verticales (CRM, facturación, etc.) ni reglas de negocio de un solo cliente.
+
+## Cómo reutilizar esta base
+
+1. Clonar o forkear el repo en un proyecto nuevo.
+2. Leer [`STARTER_SCOPE.md`](STARTER_SCOPE.md) y [`CHANGELOG.md`](CHANGELOG.md).
+3. Levantar `starter-core` y `starter-web`, ejecutar tests y adaptar dominio en el **repo del producto**, no en la plantilla genérica.
+
+### Clonación Git (nuevo producto)
+
+```bash
+git clone <URL_DEL_REPO> mi-producto
+cd mi-producto
+```
+
+Opcional: `git remote rename origin upstream` y añadir `origin` apuntando al repo vacío del producto, o trabajar directamente sobre un fork en GitHub/GitLab.
+
+**Suele personalizarse en el derivado:** nombre comercial, `package.json` / `composer.json`, variables `.env`, branding en `starter-web`, dominios y CORS. **Evita “parchear” la plantilla original:** mantén un repo de plantilla limpio y el desarrollo del producto en otro remoto.
+
+**Qué tratar como núcleo estable:** autenticación, tenancy, usuarios/roles, autorización y patrones de API en `starter-core`; capa de datos y rutas en `starter-web` hasta que el producto reemplace flujos enteros.
+
+## Qué no debes seguir desarrollando aquí
+
+Reglas de negocio **específicas de un producto** (vertical, cliente único, integraciones propias): añádelas en el repositorio derivado para no mezclar la plantilla con un dominio concreto.
+
+## Política OpenAPI v1 (starter v1)
+
+En **v1.0.0** el archivo `starter-core/docs/openapi/openapi.yaml` tiene **cobertura parcial intencional**: documenta de forma estable un subconjunto (p. ej. auth, usuarios, roles, tenant/company) usado en tests de contrato. **No** refleja aún el 100% de rutas reales (`routes/api.php`); rutas como `platform/*`, suscripción u otras pueden existir solo en código y docs narrativas.
+
+**Regla práctica:** para endpoints **documentados** en OpenAPI, mantener implementación y spec alineados. Para el resto, la fuente de verdad operativa es el código + tests + docs específicos hasta que un producto derivado amplíe el spec.
+
+Detalle: [`starter-core/docs/API_CONTRACT.md`](starter-core/docs/API_CONTRACT.md).
+
 ## OpenAPI
 
-El contrato publicado y usado en tests de contrato vive en:
+El contrato publicado y parcial (v1) vive en:
 
 `starter-core/docs/openapi/openapi.yaml`
 
-Rutas de documentación en la API (si están habilitadas en tu entorno) se describen en la documentación del core.
+Rutas de documentación en la API (si están habilitadas en tu entorno): Swagger UI en `/docs/api` (ver `starter-core`).
 
 ## Tests rápidos
 
@@ -89,7 +127,9 @@ cd starter-web && npm test
 
 ## Documentación adicional
 
-Índice maestro: [`docs/README.md`](docs/README.md).
+- Alcance oficial de la plantilla: [`STARTER_SCOPE.md`](STARTER_SCOPE.md)
+- Cambios por release: [`CHANGELOG.md`](CHANGELOG.md)
+- Índice maestro: [`docs/README.md`](docs/README.md)
 
 ## Versionado
 

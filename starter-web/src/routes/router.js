@@ -2,6 +2,7 @@ const ROUTE_CHANGE_EVENT = 'starter-web:route-change'
 
 export const ROUTES = {
   LOGIN: '/login',
+  SUBSCRIPTION_EXPIRED: '/subscription-expired',
   DASHBOARD: '/dashboard',
   USERS: '/users',
   HEALTH: '/health',

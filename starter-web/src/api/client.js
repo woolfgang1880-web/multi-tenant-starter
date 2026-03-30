@@ -1,3 +1,5 @@
+import { navigate } from '../routes/router.js'
+
 export const API_ACCESS_TOKEN_KEY = 'starter-web_access_token'
 export const API_REFRESH_TOKEN_KEY = 'starter-web_refresh_token'
 export const API_USER_KEY = 'starter-web_user'
@@ -89,6 +91,12 @@ export function clearSession({ reason = null, showMessage = false } = {}) {
   setStoredUser(null)
   if (showMessage) setAuthNotice(authNoticeForReason(reason))
   notifyAuthChange()
+}
+
+/** Limpia sesión y envía a la pantalla de acceso bloqueado (trial/suscripción). */
+export function redirectToSubscriptionExpired() {
+  clearSession({ reason: 'subscription_expired', showMessage: false })
+  navigate('/subscription-expired', { replace: true })
 }
 
 function buildUrl(path) {
@@ -227,6 +235,79 @@ export function buildAuthErrorDebugReport(err, context = {}) {
   return out
 }
 
+/**
+ * Diagnóstico para fallos al crear empresa desde plataforma (POST /platform/tenants).
+ * Indica si el problema probable está en starter-web, red/CORS o starter-core.
+ *
+ * @param {unknown} err — error lanzado por apiFetch (o null si solo estado de formulario)
+ * @param {Record<string, unknown>} [context]
+ */
+export function buildPlatformTenantCreateDebugReport(err, context = {}) {
+  const flow = 'platform_create_tenant'
+  const base =
+    err != null && typeof err === 'object'
+      ? buildAuthErrorDebugReport(err, { flow })
+      : {
+          at: new Date().toISOString(),
+          viteMode: import.meta.env.MODE,
+          apiBaseUrl: getApiBaseUrl(),
+          flow,
+          note:
+            context.clientOnlyMessage ||
+            'Sin respuesta HTTP en esta captura (solo estado del formulario o validación previa en el navegador).',
+        }
+
+  const extraHints = []
+  if (err != null && typeof err === 'object' && err.status === 403) {
+    extraHints.push(
+      'Plataforma: 403 suele ser falta de is_platform_admin, token inválido o regla de suscripción en rutas /platform/* (revisar starter-core y sesión).',
+    )
+  }
+  if (err != null && typeof err === 'object' && err.status === 422 && err.body?.data?.errors) {
+    extraHints.push(
+      'Cada clave en `responseBody.data.errors` la valida CreateTenantRequest (starter-core). Compara con el payload_intento.',
+    )
+  }
+  if (!err && context.clientOnlyMessage) {
+    extraHints.push('No se llamó a POST /api/v1/platform/tenants: el flujo se detuvo en el navegador (starter-web).')
+  }
+  if (Array.isArray(context.formBlockers) && context.formBlockers.length > 0) {
+    extraHints.push(
+      `Si «Crear empresa» está deshabilitado: ${context.formBlockers.join(' · ')}`,
+    )
+  }
+  extraHints.push(`Endpoint esperado: POST ${getApiBaseUrl()}/platform/tenants con Bearer del usuario plataforma.`)
+
+  const capaProbable = (() => {
+    if (context.clientOnlyMessage) return 'starter-web (validación antes de enviar al API)'
+    if (!err || typeof err !== 'object') return 'revisar objeto `note` y formulario_actual'
+    if (err.isNetworkError === true) {
+      return 'red / navegador / CORS / URL — comprobar VITE_API_BASE_URL y que starter-core responda'
+    }
+    const s = err.status
+    if (s === 422) return 'starter-core — validación Laravel (CreateTenantRequest, reglas fiscales)'
+    if (s === 401) return 'starter-core — autenticación (token Sanctum, user_sessions)'
+    if (s === 403) return 'starter-core — autorización o suscripción'
+    if (typeof s === 'number' && s >= 500) return 'starter-core — error interno (storage/logs/laravel.log)'
+    if (Number.isFinite(s)) return `starter-core — HTTP ${s} (revisa responseBody)`
+    return 'indeterminado — revisa message y stack'
+  })()
+
+  return {
+    ...base,
+    capa_probable: capaProbable,
+    hints: [...(Array.isArray(base.hints) ? base.hints : []), ...extraHints],
+    ...(context.payloadPreview != null
+      ? { payload_intento: redactSensitiveForDebug(context.payloadPreview) }
+      : {}),
+    ...(context.formSnapshot != null ? { formulario_actual: context.formSnapshot } : {}),
+    ...(context.formBlockers != null ? { motivos_boton_deshabilitado: context.formBlockers } : {}),
+    ...(context.clientOnlyMessage ? { validacion_previa_navegador: context.clientOnlyMessage } : {}),
+    ...(context.rfcDiagnostic != null ? { diagnostico_rfc: context.rfcDiagnostic } : {}),
+    ...(context.usuarioPlataforma != null ? { usuario_plataforma_resumen: context.usuarioPlataforma } : {}),
+  }
+}
+
 async function rawFetch(path, init = {}, options = {}) {
   const { skipAuth = false } = options
   const headers = new Headers(init.headers)
@@ -269,7 +350,13 @@ async function refreshAccessToken() {
     { skipAuth: true },
   )
 
-  if (!res.ok) return false
+  if (!res.ok) {
+    if (res.status === 403 && body?.code === 'SUBSCRIPTION_EXPIRED') {
+      redirectToSubscriptionExpired()
+      return 'subscription_expired'
+    }
+    return false
+  }
   setSessionFromTokenPayload(body?.data ?? null)
   return true
 }
@@ -294,12 +381,30 @@ export async function apiFetch(path, init = {}, options = {}) {
   let { res, body } = await rawFetch(path, init, { skipAuth })
   if (res.status === 401 && !skipAuth && retryOn401 && path !== '/auth/refresh') {
     const refreshed = await ensureFreshToken()
+    if (refreshed === 'subscription_expired') {
+      const err = normalizeError(res, body, {
+        path,
+        method: (init.method || 'GET').toString(),
+        requestUrl: buildUrl(path),
+      })
+      err.code = 'SUBSCRIPTION_EXPIRED'
+      err.status = 403
+      throw err
+    }
     if (refreshed) {
       ;({ res, body } = await rawFetch(path, init, { skipAuth }))
     }
   }
 
   if (!res.ok) {
+    if (res.status === 403 && body?.code === 'SUBSCRIPTION_EXPIRED') {
+      redirectToSubscriptionExpired()
+      throw normalizeError(res, body, {
+        path,
+        method: (init.method || 'GET').toString(),
+        requestUrl: buildUrl(path),
+      })
+    }
     if (res.status === 401 && !skipAuth) clearSession({ reason: 'session_expired', showMessage: true })
     throw normalizeError(res, body, {
       path,
@@ -352,6 +457,10 @@ async function persistMeAfterTokens() {
     const me = await getMe()
     syncStoredUserFromMe(me)
   } catch (err) {
+    if (err && typeof err === 'object' && err.code === 'SUBSCRIPTION_EXPIRED') {
+      err.afterLoginProfile = true
+      throw err
+    }
     clearSession({ reason: 'auth_error', showMessage: false })
     if (err && typeof err === 'object') {
       err.afterLoginProfile = true
@@ -465,11 +574,69 @@ export function createUser(payload) {
 }
 
 /** Crea tenant en la plataforma (Fase: super admin global). */
-export function createPlatformTenant({ nombre, codigo, activo }) {
+export function createPlatformTenant(payload = {}) {
+  const { nombre, codigo, activo, ...rest } = payload || {}
   return apiFetch('/platform/tenants', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nombre, codigo, activo }),
+    body: JSON.stringify({ nombre, codigo, activo, ...rest }),
+  })
+}
+
+/** Lista empresas/tenants de plataforma (super admin global). */
+export function getPlatformTenants({ include_inactive } = {}) {
+  const qs = new URLSearchParams()
+  if (include_inactive) qs.set('include_inactive', '1')
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiFetch(`/platform/tenants${suffix}`, { method: 'GET' })
+}
+
+/** Actualiza datos editables de empresa (operativo; sin RFC/nombre/código/nombre_fiscal). */
+export function updatePlatformTenantCompany(tenant_codigo, payload = {}) {
+  return apiFetch(`/platform/tenants/${encodeURIComponent(tenant_codigo)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Inactivación operativa (no confundir con flag `activo` de acceso). */
+export function inactivatePlatformTenant(tenant_codigo) {
+  return apiFetch(`/platform/tenants/${encodeURIComponent(tenant_codigo)}/inactivate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+}
+
+/** Reactivación operativa dentro de la ventana permitida. */
+export function reactivatePlatformTenant(tenant_codigo) {
+  return apiFetch(`/platform/tenants/${encodeURIComponent(tenant_codigo)}/reactivate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+}
+
+/** Solicitud pública de activación tras bloqueo (sin sesión). */
+export function requestSubscriptionActivation(payload = {}) {
+  return apiFetch(
+    '/subscription/request-activation',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    { skipAuth: true, retryOn401: false },
+  )
+}
+
+/** Cambia suscripción trial → active | suspended (solo plataforma). */
+export function updatePlatformTenantSubscription({ tenant_codigo, subscription_status }) {
+  return apiFetch(`/platform/tenants/${encodeURIComponent(tenant_codigo)}/subscription`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription_status }),
   })
 }
 

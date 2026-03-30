@@ -7,6 +7,8 @@ Punto de entrada para onboarding. El detalle técnico vive en cada paquete.
 | Documento | Ubicación |
 |-----------|-----------|
 | README principal (stack, comandos, CORS, v1.0.0) | [../README.md](../README.md) |
+| Alcance starter v1 (qué incluye / qué no) | [../STARTER_SCOPE.md](../STARTER_SCOPE.md) |
+| Changelog (v1.0.0) | [../CHANGELOG.md](../CHANGELOG.md) |
 | Comando `app:setup-demo` | [../starter-core/docs/SETUP_DEMO.md](../starter-core/docs/SETUP_DEMO.md) |
 | Usuarios y credenciales demo | [../starter-core/docs/DEMO_USERS.md](../starter-core/docs/DEMO_USERS.md) |
 | OpenAPI (contrato API) | [../starter-core/docs/openapi/openapi.yaml](../starter-core/docs/openapi/openapi.yaml) |

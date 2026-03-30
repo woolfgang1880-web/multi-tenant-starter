@@ -45,6 +45,12 @@ final class SwitchTenantController extends Controller
                     null,
                     403
                 ),
+                'subscription_blocked' => ApiResponse::make(
+                    AuthErrorCode::SUBSCRIPTION_EXPIRED,
+                    'El periodo de prueba de esta empresa ha finalizado o el acceso no está disponible.',
+                    null,
+                    403
+                ),
                 default => ApiResponse::make(
                     AuthErrorCode::SESSION_INVALID,
                     'Sesión no válida.',
